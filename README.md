@@ -71,7 +71,10 @@ version), copy:
 - the **anon** / **publishable** key
 
 The anon key is meant to be public. It only gives the access that the database policies allow.
-**Never use the `service_role` / secret key in this app.**
+**Never use the `service_role` / secret key in this app.** It bypasses row level security, and
+anything in a `VITE_` variable ends up in the published JavaScript. The build, the dev server and
+the RLS test refuse to start when they detect a secret or `service_role` key
+([scripts/check-key.js](scripts/check-key.js)).
 
 ### 6. Add repository variables in GitHub
 

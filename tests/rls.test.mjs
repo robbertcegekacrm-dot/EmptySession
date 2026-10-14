@@ -7,12 +7,19 @@
 // Run:  npm run test:rls        (reads VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY and
 //                                ORGANIZER_CODE from .env)
 import { createClient } from '@supabase/supabase-js';
+import { supabaseKeyProblem } from '../scripts/check-key.js';
 
 const url = process.env.VITE_SUPABASE_URL;
 const key = process.env.VITE_SUPABASE_ANON_KEY;
 const organizerCode = process.env.ORGANIZER_CODE;
 if (!url || !key || !organizerCode) {
   console.error('Set VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY and ORGANIZER_CODE in .env first.');
+  process.exit(2);
+}
+// With a secret key the "no session" client runs as service_role and the results mean nothing.
+const keyProblem = supabaseKeyProblem(key);
+if (keyProblem) {
+  console.error(keyProblem);
   process.exit(2);
 }
 
