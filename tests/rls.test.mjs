@@ -26,12 +26,14 @@ function check(label, ok, detail) {
 // A write that RLS or privileges must stop: either an error, or zero rows touched.
 const blocked = (res) => Boolean(res.error) || (Array.isArray(res.data) && res.data.length === 0);
 
+// A problem with the project setup rather than with the security rules (exit code 2).
+class SetupError extends Error {}
+
 async function signIn(client, name) {
   const { data, error } = await client.auth.signInAnonymously();
   if (error) {
-    console.error(`Anonymous sign-in failed for ${name}: ${error.message}`);
-    console.error('Is "Allow anonymous sign-ins" enabled under Authentication > Sign In / Providers?');
-    process.exit(2);
+    throw new SetupError(`Anonymous sign-in failed for ${name}: ${error.message}\n`
+      + 'Is "Allow anonymous sign-ins" enabled under Authentication > Sign In / Providers?');
   }
   return data.user.id;
 }
@@ -41,6 +43,7 @@ const a = newClient();
 const b = newClient();
 const nobody = newClient(); // never signs in
 let sid = null;
+let setupError = null;
 
 try {
   await signIn(org, 'organizer');
@@ -169,8 +172,13 @@ try {
   r = await org.rpc('unlock_organizer', { p_code: organizerCode });
 
 } catch (e) {
-  failures++;
-  console.error('Unexpected error:', e);
+  if (e instanceof SetupError) {
+    setupError = e;
+    console.error(e.message);
+  } else {
+    failures++;
+    console.error('Unexpected error:', e);
+  }
 } finally {
   if (sid) {
     const r = await org.rpc('delete_session', { p_session_id: sid });
@@ -181,5 +189,12 @@ try {
   await org.rpc('lock_organizer');
 }
 
-console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');
-process.exit(failures ? 1 : 0);
+// Set the exit code and let Node exit on its own. Calling process.exit() while the Supabase
+// clients still have connections closing crashes Node on Windows (libuv async.c assertion).
+if (setupError) {
+  console.log('\nSetup problem, security checks did not run');
+  process.exitCode = 2;
+} else {
+  console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');
+  process.exitCode = failures ? 1 : 0;
+}
