@@ -4,7 +4,8 @@ import { state, ui, drafts } from './state.js';
 import { render, paint, go } from './render.js';
 import { ACT, enterRoom, submitFor } from './actions.js';
 import { ensureSignedIn } from './api.js';
-import { loadSessions, loadMine, loadOrganizer, getSession, isMember, myProfile } from './data.js';
+import { loadSessions, loadMine, loadOrganizer, loadOrganizerData, loadRoom, getSession, isMember, myProfile } from './data.js';
+import { watchSessions, watchOrganizer, stopRoom } from './realtime.js';
 import { LS, toast } from './util.js';
 
 // ---------- events ----------
@@ -56,8 +57,9 @@ function fatal(title, text) {
 }
 
 // If the session someone is looking at disappears, send them back to the list.
-export function checkCurrentSession() {
+function checkCurrentSession() {
   if (['room', 'code', 'profile'].includes(ui.screen) && ui.sid && !getSession(ui.sid)) {
+    stopRoom();
     ui.screen = 'pick';
     toast('That session was removed by the organizer.');
   }
@@ -83,6 +85,20 @@ async function init() {
     console.error(e);
     return fatal("Can't load sessions", 'Reload the page to try again.');
   }
+
+  // Live updates: the session list for everyone, counts for organizers.
+  watchSessions(async () => {
+    await Promise.all([loadSessions(), loadOrganizerData()]).catch(() => {});
+    checkCurrentSession();
+  });
+  if (state.isOrganizer) watchOrganizer(() => loadOrganizerData().catch(() => {}));
+
+  // Phones drop the websocket when asleep; catch up when the page is visible again.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    loadSessions().then(checkCurrentSession).catch(() => {});
+    if (ui.screen === 'room') loadRoom().catch(() => {});
+  });
 
   const last = LS.get('hub.last', null);
   if (last && getSession(last) && (state.isOrganizer || (isMember(last) && myProfile(last)))) enterRoom(last);

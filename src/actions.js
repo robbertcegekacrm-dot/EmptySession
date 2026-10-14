@@ -3,6 +3,7 @@ import * as api from './api.js';
 import { state, ui, drafts } from './state.js';
 import { render, go } from './render.js';
 import { LS, toast, genCode, friendlyError } from './util.js';
+import { watchRoom, stopRoom, nudgeRoom, watchOrganizer, stopOrganizer } from './realtime.js';
 import {
   loadSessions, loadMine, loadOrganizer, loadOrganizerData, loadRoom, setRoom,
   getSession, isMember, myProfile, latestProfile, myAnswer, roomQuestions,
@@ -30,6 +31,7 @@ export function enterRoom(sid) {
   setRoom(sid);
   go('room');
   loadRoom().catch((e) => toast(friendlyError(e)));
+  watchRoom(sid, (parts) => loadRoom(parts).catch(() => {}));
 }
 
 function goProfile(sid) {
@@ -45,9 +47,10 @@ function goProfile(sid) {
 }
 
 export const ACT = {
-  home() { ui.codeError = ''; go('pick'); },
+  home() { stopRoom(); ui.codeError = ''; go('pick'); },
 
   admin() {
+    stopRoom();
     if (state.isOrganizer) { go('admin'); loadOrganizerData().catch(() => {}); }
     else { ui.orgError = ''; go('orgcode'); }
   },
@@ -131,7 +134,12 @@ export const ACT = {
 
   async removeQ({ qid, mine }) {
     const ok = await attempt(() => (mine ? api.deleteQuestion(qid) : api.moderateQuestion(qid, { hidden: true })), 'Question removed');
-    if (ok) loadRoom(['questions']);
+    if (ok) {
+      // Participants can't SELECT a hidden question, so RLS keeps the UPDATE event from
+      // reaching them. Nudge their clients to re-fetch instead.
+      if (!mine) nudgeRoom('questions');
+      loadRoom(['questions']);
+    }
   },
 
   startReply({ qid }) {
@@ -167,6 +175,7 @@ export const ACT = {
     ui.orgError = '';
     drafts.orgc = '';
     await loadOrganizer();
+    watchOrganizer(() => loadOrganizerData().catch(() => {}));
     go('admin');
   },
 
@@ -175,6 +184,7 @@ export const ACT = {
       state.isOrganizer = false;
       state.codes = {};
       state.stats = {};
+      stopOrganizer();
       go('pick');
     }
   },
